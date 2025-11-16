@@ -2,10 +2,16 @@
 
 import { useState, useEffect } from "react"
 import { motion, AnimatePresence } from "framer-motion"
-import { Play, Trash2, Download } from "lucide-react"
+import { Play, Trash2, Download } from 'lucide-react'
 import { Button } from "@/components/ui/button"
 import { VideoTimeline } from "@/components/video-timeline"
-import { extractClipThumbnail, getVideoDuration, exportClip, type Clip } from "@/lib/video-utils"
+import {
+  extractClipThumbnail,
+  getVideoDuration,
+  exportClipFromServer,
+  uploadVideoToServer,
+  type Clip,
+} from "@/lib/video-utils"
 
 interface ClipCreatorProps {
   videoFile: File
@@ -17,10 +23,26 @@ export function ClipCreator({ videoFile }: ClipCreatorProps) {
   const [selectedClip, setSelectedClip] = useState<Clip | null>(null)
   const [isLoadingThumbnail, setIsLoadingThumbnail] = useState(false)
   const [downloadingClipId, setDownloadingClipId] = useState<string | null>(null)
+  const [videoId, setVideoId] = useState<string | null>(null)
+  const [isUploading, setIsUploading] = useState(false)
 
   useEffect(() => {
     getVideoDuration(videoFile).then(setDuration)
+    uploadVideo()
   }, [videoFile])
+
+  const uploadVideo = async () => {
+    setIsUploading(true)
+    try {
+      const id = await uploadVideoToServer(videoFile)
+      setVideoId(id)
+      console.log("[v0] Video uploaded to server with ID:", id)
+    } catch (error) {
+      console.error("[v0] Error uploading video:", error)
+    } finally {
+      setIsUploading(false)
+    }
+  }
 
   const handleClipCreate = async (startTime: number, endTime: number) => {
     setIsLoadingThumbnail(true)
@@ -49,11 +71,32 @@ export function ClipCreator({ videoFile }: ClipCreatorProps) {
   }
 
   const handleClipDownload = async (clip: Clip, index: number) => {
+    if (!videoId) {
+      console.error("[v0] Video not uploaded to server yet")
+      return
+    }
+
     setDownloadingClipId(clip.id)
     try {
-      await exportClip(videoFile, clip.startTime, clip.endTime, `clip-${index + 1}`)
+      await exportClipFromServer(videoId, [{ start: clip.startTime, end: clip.endTime }], "mp4")
     } catch (error) {
       console.error("[v0] Error downloading clip:", error)
+    } finally {
+      setDownloadingClipId(null)
+    }
+  }
+
+  const handleDownloadAll = async () => {
+    if (!videoId || clips.length === 0) {
+      return
+    }
+
+    setDownloadingClipId("all")
+    try {
+      const clipRanges = clips.map((clip) => ({ start: clip.startTime, end: clip.endTime }))
+      await exportClipFromServer(videoId, clipRanges, "mp4")
+    } catch (error) {
+      console.error("[v0] Error downloading all clips:", error)
     } finally {
       setDownloadingClipId(null)
     }
@@ -72,6 +115,8 @@ export function ClipCreator({ videoFile }: ClipCreatorProps) {
         <p className="text-muted-foreground">
           Use the timeline to select segments and create multiple clips from your video
         </p>
+        {isUploading && <p className="text-sm text-muted-foreground mt-2">Uploading video to server...</p>}
+        {videoId && <p className="text-sm text-accent mt-2">Video ready for processing (ID: {videoId})</p>}
       </div>
 
       <VideoTimeline videoFile={videoFile} duration={duration} onClipCreate={handleClipCreate} />
@@ -80,6 +125,12 @@ export function ClipCreator({ videoFile }: ClipCreatorProps) {
         <div className="space-y-4">
           <div className="flex items-center justify-between">
             <h3 className="text-xl font-semibold text-foreground">Your Clips ({clips.length})</h3>
+            {clips.length > 1 && videoId && (
+              <Button onClick={handleDownloadAll} disabled={downloadingClipId !== null} size="sm">
+                <Download className="w-4 h-4 mr-2" />
+                Download All ({clips.length})
+              </Button>
+            )}
           </div>
 
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
@@ -130,7 +181,7 @@ export function ClipCreator({ videoFile }: ClipCreatorProps) {
                         e.stopPropagation()
                         handleClipDownload(clip, index)
                       }}
-                      disabled={downloadingClipId === clip.id}
+                      disabled={downloadingClipId !== null || !videoId}
                     >
                       <Download className="w-4 h-4" />
                     </Button>

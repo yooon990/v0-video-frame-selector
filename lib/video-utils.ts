@@ -197,6 +197,62 @@ export async function getVideoDuration(videoFile: File): Promise<number> {
   })
 }
 
+export async function uploadVideoToServer(videoFile: File): Promise<string> {
+  const formData = new FormData()
+  formData.append("video", videoFile)
+
+  const response = await fetch("/api/upload", {
+    method: "POST",
+    body: formData,
+  })
+
+  if (!response.ok) {
+    throw new Error("Failed to upload video")
+  }
+
+  const data = await response.json()
+  return data.videoId
+}
+
+export async function exportClipFromServer(
+  videoId: string,
+  clips: Array<{ start: number; end: number }>,
+  format: string = "mp4"
+): Promise<void> {
+  const response = await fetch("/api/export", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      videoId,
+      clips,
+      format,
+    }),
+  })
+
+  if (!response.ok) {
+    throw new Error("Failed to export clips")
+  }
+
+  const data = await response.json()
+
+  // Download each exported clip
+  for (const clip of data.clips) {
+    const blob = new Blob([Uint8Array.from(atob(clip.data), (c) => c.charCodeAt(0))], { type: "video/mp4" })
+    const url = URL.createObjectURL(blob)
+
+    const a = document.createElement("a")
+    a.href = url
+    a.download = `clip-${clip.clipNumber}_${clip.startTime.toFixed(1)}s-${clip.endTime.toFixed(1)}s.mp4`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+
+    URL.revokeObjectURL(url)
+  }
+}
+
 export async function exportClip(videoFile: File, startTime: number, endTime: number, clipName: string): Promise<void> {
   return new Promise((resolve, reject) => {
     const video = document.createElement("video")
