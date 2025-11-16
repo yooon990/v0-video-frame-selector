@@ -1,212 +1,292 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useRef, useEffect } from "react"
 import { motion, AnimatePresence } from "framer-motion"
-import { Play, Trash2, Download } from 'lucide-react'
+import { Play, Pause, Scissors, Download, Trash2, Loader2 } from 'lucide-react'
 import { Button } from "@/components/ui/button"
-import { VideoTimeline } from "@/components/video-timeline"
-import {
-  extractClipThumbnail,
-  getVideoDuration,
-  exportClipFromServer,
-  uploadVideoToServer,
-  type Clip,
-} from "@/lib/video-utils"
+import { Slider } from "@/components/ui/slider"
+import { type Clip, generateClipThumbnail } from "@/lib/video-utils"
 
 interface ClipCreatorProps {
   videoFile: File
 }
 
 export function ClipCreator({ videoFile }: ClipCreatorProps) {
-  const [clips, setClips] = useState<Clip[]>([])
+  const videoRef = useRef<HTMLVideoElement>(null)
+  const [isPlaying, setIsPlaying] = useState(false)
+  const [currentTime, setCurrentTime] = useState(0)
   const [duration, setDuration] = useState(0)
-  const [selectedClip, setSelectedClip] = useState<Clip | null>(null)
-  const [isLoadingThumbnail, setIsLoadingThumbnail] = useState(false)
-  const [downloadingClipId, setDownloadingClipId] = useState<string | null>(null)
-  const [videoId, setVideoId] = useState<string | null>(null)
-  const [isUploading, setIsUploading] = useState(false)
+  const [clips, setClips] = useState<Clip[]>([])
+  const [trimRange, setTrimRange] = useState<[number, number]>([0, 0])
+  const [isCreatingClip, setIsCreatingClip] = useState(false)
 
   useEffect(() => {
-    getVideoDuration(videoFile).then(setDuration)
-    uploadVideo()
+    if (videoRef.current) {
+      const video = videoRef.current
+      video.src = URL.createObjectURL(videoFile)
+      
+      return () => {
+        if (video.src) {
+          URL.revokeObjectURL(video.src)
+        }
+      }
+    }
   }, [videoFile])
 
-  const uploadVideo = async () => {
-    setIsUploading(true)
-    try {
-      const id = await uploadVideoToServer(videoFile)
-      setVideoId(id)
-      console.log("[v0] Video uploaded to server with ID:", id)
-    } catch (error) {
-      console.error("[v0] Error uploading video:", error)
-    } finally {
-      setIsUploading(false)
+  const handleLoadedMetadata = () => {
+    if (videoRef.current) {
+      const dur = videoRef.current.duration
+      setDuration(dur)
+      setTrimRange([0, dur])
     }
   }
 
-  const handleClipCreate = async (startTime: number, endTime: number) => {
-    setIsLoadingThumbnail(true)
-    try {
-      const thumbnail = await extractClipThumbnail(videoFile, startTime)
-      const newClip: Clip = {
-        id: `clip-${Date.now()}`,
-        startTime,
-        endTime,
-        duration: endTime - startTime,
-        thumbnail,
+  const handleTimeUpdate = () => {
+    if (videoRef.current) {
+      setCurrentTime(videoRef.current.currentTime)
+    }
+  }
+
+  const togglePlayPause = () => {
+    if (videoRef.current) {
+      if (isPlaying) {
+        videoRef.current.pause()
+      } else {
+        videoRef.current.play()
       }
-      setClips((prev) => [...prev, newClip])
-    } catch (error) {
-      console.error("[v0] Error creating clip:", error)
-    } finally {
-      setIsLoadingThumbnail(false)
+      setIsPlaying(!isPlaying)
     }
   }
 
-  const handleClipDelete = (clipId: string) => {
-    setClips((prev) => prev.filter((c) => c.id !== clipId))
-    if (selectedClip?.id === clipId) {
-      setSelectedClip(null)
+  const handleSeek = (value: number[]) => {
+    if (videoRef.current) {
+      videoRef.current.currentTime = value[0]
+      setCurrentTime(value[0])
     }
   }
 
-  const handleClipDownload = async (clip: Clip, index: number) => {
-    if (!videoId) {
-      console.error("[v0] Video not uploaded to server yet")
-      return
-    }
-
-    setDownloadingClipId(clip.id)
-    try {
-      await exportClipFromServer(videoId, [{ start: clip.startTime, end: clip.endTime }], "mp4")
-    } catch (error) {
-      console.error("[v0] Error downloading clip:", error)
-    } finally {
-      setDownloadingClipId(null)
-    }
-  }
-
-  const handleDownloadAll = async () => {
-    if (!videoId || clips.length === 0) {
-      return
-    }
-
-    setDownloadingClipId("all")
-    try {
-      const clipRanges = clips.map((clip) => ({ start: clip.startTime, end: clip.endTime }))
-      await exportClipFromServer(videoId, clipRanges, "mp4")
-    } catch (error) {
-      console.error("[v0] Error downloading all clips:", error)
-    } finally {
-      setDownloadingClipId(null)
-    }
+  const handleTrimRangeChange = (value: number[]) => {
+    setTrimRange([value[0], value[1]])
   }
 
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60)
     const secs = Math.floor(seconds % 60)
-    return `${mins}:${secs.toString().padStart(2, "0")}`
+    const ms = Math.floor((seconds % 1) * 10)
+    return `${mins}:${secs.toString().padStart(2, "0")}.${ms}`
+  }
+
+  const createClip = async () => {
+    setIsCreatingClip(true)
+    
+    try {
+      const clipId = `clip-${Date.now()}`
+      const thumbnailUrl = await generateClipThumbnail(videoFile, trimRange[0])
+      
+      const newClip: Clip = {
+        id: clipId,
+        startTime: trimRange[0],
+        endTime: trimRange[1],
+        thumbnailUrl,
+        status: 'pending'
+      }
+      
+      setClips(prev => [...prev, newClip])
+      
+      const response = await fetch('/api/clips/create', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          startTime: trimRange[0],
+          endTime: trimRange[1],
+          fileName: videoFile.name
+        }),
+      })
+      
+      if (response.ok) {
+        const data = await response.json()
+        
+        setClips(prev => prev.map(clip => 
+          clip.id === clipId 
+            ? { ...clip, videoUrl: data.url, status: 'completed' }
+            : clip
+        ))
+      } else {
+        setClips(prev => prev.map(clip => 
+          clip.id === clipId 
+            ? { ...clip, status: 'error' }
+            : clip
+        ))
+      }
+    } catch (error) {
+      console.error("[v0] Error creating clip:", error)
+    } finally {
+      setIsCreatingClip(false)
+    }
+  }
+
+  const deleteClip = (clipId: string) => {
+    setClips(prev => prev.filter(clip => clip.id !== clipId))
+  }
+
+  const downloadClip = (clip: Clip) => {
+    if (clip.videoUrl) {
+      const a = document.createElement('a')
+      a.href = clip.videoUrl
+      a.download = `clip-${clip.startTime}-${clip.endTime}.mp4`
+      a.click()
+    }
   }
 
   return (
     <div className="space-y-8">
-      <div>
-        <h2 className="text-2xl font-semibold text-foreground mb-2">Create Short Clips</h2>
-        <p className="text-muted-foreground">
-          Use the timeline to select segments and create multiple clips from your video
-        </p>
-        {isUploading && <p className="text-sm text-muted-foreground mt-2">Uploading video to server...</p>}
-        {videoId && <p className="text-sm text-accent mt-2">Video ready for processing (ID: {videoId})</p>}
+      {/* Video Player */}
+      <div className="bg-card rounded-2xl shadow-md overflow-hidden border border-border">
+        <video
+          ref={videoRef}
+          className="w-full aspect-video bg-black"
+          onLoadedMetadata={handleLoadedMetadata}
+          onTimeUpdate={handleTimeUpdate}
+          onEnded={() => setIsPlaying(false)}
+        />
+        
+        <div className="p-6 space-y-4">
+          {/* Playback Controls */}
+          <div className="flex items-center gap-4">
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={togglePlayPause}
+              className="rounded-full"
+            >
+              {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+            </Button>
+            
+            <div className="flex-1">
+              <Slider
+                value={[currentTime]}
+                max={duration}
+                step={0.1}
+                onValueChange={handleSeek}
+                className="cursor-pointer"
+              />
+            </div>
+            
+            <span className="text-sm text-muted-foreground font-mono min-w-[80px] text-right">
+              {formatTime(currentTime)} / {formatTime(duration)}
+            </span>
+          </div>
+          
+          {/* Trim Range */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <label className="text-sm font-medium">Trim Range</label>
+              <span className="text-sm text-muted-foreground font-mono">
+                {formatTime(trimRange[0])} - {formatTime(trimRange[1])}
+              </span>
+            </div>
+            <Slider
+              value={trimRange}
+              max={duration}
+              step={0.1}
+              onValueChange={handleTrimRangeChange}
+              className="cursor-pointer"
+              minStepsBetweenThumbs={1}
+            />
+          </div>
+          
+          <Button
+            onClick={createClip}
+            disabled={isCreatingClip}
+            className="w-full"
+          >
+            {isCreatingClip ? (
+              <>
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                Creating Clip...
+              </>
+            ) : (
+              <>
+                <Scissors className="w-4 h-4 mr-2" />
+                Create Clip
+              </>
+            )}
+          </Button>
+        </div>
       </div>
-
-      <VideoTimeline videoFile={videoFile} duration={duration} onClipCreate={handleClipCreate} />
-
+      
+      {/* Clips List */}
       {clips.length > 0 && (
         <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <h3 className="text-xl font-semibold text-foreground">Your Clips ({clips.length})</h3>
-            {clips.length > 1 && videoId && (
-              <Button onClick={handleDownloadAll} disabled={downloadingClipId !== null} size="sm">
-                <Download className="w-4 h-4 mr-2" />
-                Download All ({clips.length})
-              </Button>
-            )}
-          </div>
-
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+          <h3 className="text-xl font-semibold">Created Clips ({clips.length})</h3>
+          
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <AnimatePresence>
-              {clips.map((clip, index) => (
+              {clips.map((clip) => (
                 <motion.div
                   key={clip.id}
                   initial={{ opacity: 0, scale: 0.9 }}
                   animate={{ opacity: 1, scale: 1 }}
                   exit={{ opacity: 0, scale: 0.9 }}
-                  transition={{ delay: index * 0.05 }}
-                  className="relative group"
+                  className="bg-card rounded-xl border border-border overflow-hidden shadow-md hover:shadow-lg transition-shadow"
                 >
-                  <div
-                    className={`relative rounded-xl overflow-hidden border-2 transition-all duration-300 cursor-pointer ${
-                      selectedClip?.id === clip.id
-                        ? "border-accent shadow-xl"
-                        : "border-border hover:border-accent/50 hover:shadow-lg"
-                    }`}
-                    onClick={() => setSelectedClip(clip)}
-                  >
-                    {clip.thumbnail && (
+                  <div className="relative aspect-video bg-muted">
+                    {clip.thumbnailUrl && (
                       <img
-                        src={clip.thumbnail || "/placeholder.svg"}
-                        alt={`Clip ${index + 1}`}
-                        className="w-full aspect-video object-cover"
+                        src={clip.thumbnailUrl || "/placeholder.svg"}
+                        alt="Clip thumbnail"
+                        className="w-full h-full object-cover"
                       />
                     )}
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent" />
-                    <div className="absolute bottom-2 left-2 right-2">
-                      <p className="text-white text-xs font-medium">Clip {index + 1}</p>
-                      <p className="text-white/80 text-xs">
-                        {formatTime(clip.startTime)} - {formatTime(clip.endTime)}
-                      </p>
-                      <p className="text-white/60 text-xs">{formatTime(clip.duration)} duration</p>
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/70 to-transparent" />
+                    <div className="absolute bottom-2 left-2 text-white text-xs font-medium">
+                      {formatTime(clip.startTime)} - {formatTime(clip.endTime)}
                     </div>
-                    <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/40">
-                      <Play className="w-8 h-8 text-white" />
-                    </div>
+                    {clip.status === 'processing' && (
+                      <div className="absolute inset-0 flex items-center justify-center bg-black/50">
+                        <Loader2 className="w-8 h-8 text-white animate-spin" />
+                      </div>
+                    )}
                   </div>
-
-                  <div className="absolute -top-2 -right-2 flex gap-1 z-10">
-                    <Button
-                      size="icon"
-                      variant="secondary"
-                      className="w-8 h-8 rounded-full shadow-lg"
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        handleClipDownload(clip, index)
-                      }}
-                      disabled={downloadingClipId !== null || !videoId}
-                    >
-                      <Download className="w-4 h-4" />
-                    </Button>
-                    <Button
-                      size="icon"
-                      variant="destructive"
-                      className="w-8 h-8 rounded-full shadow-lg"
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        handleClipDelete(clip.id)
-                      }}
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </Button>
+                  
+                  <div className="p-4 space-y-3">
+                    {clip.videoUrl && (
+                      <div className="text-xs text-muted-foreground font-mono break-all bg-muted p-2 rounded">
+                        {clip.videoUrl}
+                      </div>
+                    )}
+                    
+                    <div className="flex gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => downloadClip(clip)}
+                        disabled={clip.status !== 'completed'}
+                        className="flex-1"
+                      >
+                        <Download className="w-3 h-3 mr-2" />
+                        Download
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => deleteClip(clip.id)}
+                        className="text-destructive hover:text-destructive"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </Button>
+                    </div>
+                    
+                    {clip.status === 'error' && (
+                      <p className="text-xs text-destructive">Failed to create clip</p>
+                    )}
                   </div>
                 </motion.div>
               ))}
             </AnimatePresence>
           </div>
-        </div>
-      )}
-
-      {isLoadingThumbnail && (
-        <div className="text-center text-muted-foreground">
-          <p>Creating clip...</p>
         </div>
       )}
     </div>
