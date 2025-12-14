@@ -5,15 +5,6 @@ export interface Frame {
   index: number
 }
 
-export interface Clip {
-  id: string
-  startTime: number
-  endTime: number
-  thumbnailUrl?: string
-  videoUrl?: string
-  status: 'pending' | 'processing' | 'completed' | 'error'
-}
-
 export async function extractFrames(videoFile: File, frameCount = 20): Promise<Frame[]> {
   return new Promise((resolve, reject) => {
     const video = document.createElement("video")
@@ -131,42 +122,6 @@ export async function extractNearbyFrames(videoFile: File, centerTimestamp: numb
       }
 
       captureFrame()
-    }
-
-    video.onerror = () => {
-      reject(new Error("Error loading video"))
-      URL.revokeObjectURL(video.src)
-    }
-
-    video.src = URL.createObjectURL(videoFile)
-  })
-}
-
-export async function generateClipThumbnail(videoFile: File, timestamp: number): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const video = document.createElement("video")
-    const canvas = document.createElement("canvas")
-    const ctx = canvas.getContext("2d")
-
-    if (!ctx) {
-      reject(new Error("Could not get canvas context"))
-      return
-    }
-
-    video.preload = "metadata"
-    video.crossOrigin = "anonymous"
-
-    video.onloadedmetadata = () => {
-      canvas.width = video.videoWidth
-      canvas.height = video.videoHeight
-      video.currentTime = timestamp
-    }
-
-    video.onseeked = () => {
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
-      const dataUrl = canvas.toDataURL("image/jpeg", 0.8)
-      resolve(dataUrl)
-      URL.revokeObjectURL(video.src)
     }
 
     video.onerror = () => {

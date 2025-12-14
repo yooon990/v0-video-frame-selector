@@ -15,6 +15,7 @@ interface FrameCarouselProps {
 
 export function FrameCarousel({ frames, selectedFrames, onFrameSelect, onFrameClick }: FrameCarouselProps) {
   const [currentPage, setCurrentPage] = useState(0)
+  const [direction, setDirection] = useState(0)
   const framesPerPage = 4
   const totalPages = Math.ceil(frames.length / framesPerPage)
 
@@ -25,8 +26,10 @@ export function FrameCarousel({ frames, selectedFrames, onFrameSelect, onFrameCl
   const handleDragEnd = (_: any, info: PanInfo) => {
     const swipeThreshold = 50
     if (info.offset.x > swipeThreshold && currentPage > 0) {
+      setDirection(1)
       setCurrentPage(currentPage - 1)
     } else if (info.offset.x < -swipeThreshold && currentPage < totalPages - 1) {
+      setDirection(-1)
       setCurrentPage(currentPage + 1)
     }
   }
@@ -43,7 +46,10 @@ export function FrameCarousel({ frames, selectedFrames, onFrameSelect, onFrameCl
         <Button
           variant="outline"
           size="icon"
-          onClick={() => setCurrentPage(Math.max(0, currentPage - 1))}
+          onClick={() => {
+            setDirection(1)
+            setCurrentPage(Math.max(0, currentPage - 1))
+          }}
           disabled={currentPage === 0}
           className="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-16 z-10"
         >
@@ -53,7 +59,10 @@ export function FrameCarousel({ frames, selectedFrames, onFrameSelect, onFrameCl
         <Button
           variant="outline"
           size="icon"
-          onClick={() => setCurrentPage(Math.min(totalPages - 1, currentPage + 1))}
+          onClick={() => {
+            setDirection(-1)
+            setCurrentPage(Math.min(totalPages - 1, currentPage + 1))
+          }}
           disabled={currentPage === totalPages - 1}
           className="absolute right-0 top-1/2 -translate-y-1/2 translate-x-16 z-10"
         >
@@ -70,9 +79,9 @@ export function FrameCarousel({ frames, selectedFrames, onFrameSelect, onFrameCl
           <AnimatePresence mode="wait">
             <motion.div
               key={currentPage}
-              initial={{ opacity: 0, x: 100 }}
+              initial={{ opacity: 0, x: -100 * direction }}
               animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: -100 }}
+              exit={{ opacity: 0, x: 100 * direction }}
               transition={{ duration: 0.3, ease: "easeInOut" }}
               className="grid grid-cols-2 gap-6"
             >
