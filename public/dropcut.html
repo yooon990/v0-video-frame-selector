@@ -1,0 +1,958 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>DROPCUT - Video Frame Selection Tool</title>
+  <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    :root {
+      --bg: #FAFAFA;
+      --fg: #1a1a1a;
+      --card: #FFFFFF;
+      --card-fg: #1a1a1a;
+      --muted: #737373;
+      --border: #e5e5e5;
+      --accent: #3b6ce7;
+      --accent-fg: #FAFAFA;
+      --radius: 16px;
+    }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: var(--bg);
+      color: var(--fg);
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ── Page Sections ── */
+    .page-section {
+      display: none;
+      min-height: 100vh;
+      animation: fadeIn 0.4s ease;
+    }
+    .page-section.active {
+      display: block;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(12px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    @keyframes scaleIn {
+      from { opacity: 0; transform: scale(0); }
+      to   { opacity: 1; transform: scale(1); }
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 48px 16px;
+    }
+
+    /* ── Buttons ── */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 10px 20px;
+      border-radius: calc(var(--radius) - 4px);
+      font-size: 14px;
+      font-weight: 500;
+      border: none;
+      cursor: pointer;
+      transition: all 0.2s;
+      font-family: inherit;
+      line-height: 1;
+    }
+    .btn-primary {
+      background: var(--fg);
+      color: var(--bg);
+    }
+    .btn-primary:hover {
+      background: #333;
+    }
+    .btn-primary:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    .btn-outline {
+      background: var(--card);
+      color: var(--fg);
+      border: 1px solid var(--border);
+    }
+    .btn-outline:hover {
+      background: #f5f5f5;
+      border-color: #ccc;
+    }
+    .btn-outline:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+    .btn-ghost {
+      background: transparent;
+      color: var(--fg);
+    }
+    .btn-ghost:hover {
+      background: #f0f0f0;
+    }
+    .btn-icon {
+      width: 40px;
+      height: 40px;
+      padding: 0;
+    }
+    .btn-lg {
+      padding: 14px 28px;
+      font-size: 15px;
+    }
+    .btn-sm {
+      padding: 6px 14px;
+      font-size: 13px;
+    }
+
+    /* ── Upload Area ── */
+    .upload-zone {
+      max-width: 640px;
+      margin: 0 auto;
+    }
+    .upload-label {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      width: 100%;
+      height: 256px;
+      background: var(--card);
+      border: 2px dashed var(--border);
+      border-radius: var(--radius);
+      box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+      cursor: pointer;
+      transition: all 0.3s;
+      position: relative;
+    }
+    .upload-label:hover {
+      border-color: var(--accent);
+      background: rgba(59, 108, 231, 0.03);
+    }
+    .upload-label input {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      opacity: 0;
+      cursor: pointer;
+      z-index: 10;
+    }
+    .upload-icon-wrap {
+      width: 64px;
+      height: 64px;
+      background: rgba(59, 108, 231, 0.1);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 16px;
+    }
+    .upload-icon-wrap svg {
+      width: 32px;
+      height: 32px;
+      color: var(--accent);
+    }
+
+    /* ── Frame Grid ── */
+    .frame-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 24px;
+    }
+    @media (max-width: 640px) {
+      .frame-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+    .frame-card {
+      position: relative;
+    }
+    .frame-card:hover .frame-overlay {
+      opacity: 1;
+    }
+    .frame-img-wrap {
+      position: relative;
+      border-radius: var(--radius);
+      overflow: hidden;
+      border: 2px solid var(--border);
+      cursor: pointer;
+      transition: all 0.3s;
+    }
+    .frame-img-wrap:hover {
+      border-color: rgba(59, 108, 231, 0.5);
+      box-shadow: 0 8px 24px rgba(0,0,0,0.08);
+    }
+    .frame-img-wrap.selected {
+      border-color: var(--accent);
+      box-shadow: 0 8px 24px rgba(59, 108, 231, 0.15);
+    }
+    .frame-img-wrap img {
+      width: 100%;
+      aspect-ratio: 16/9;
+      object-fit: cover;
+      display: block;
+    }
+    .frame-overlay {
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(to top, rgba(0,0,0,0.7), rgba(0,0,0,0.2), transparent);
+      opacity: 0;
+      transition: opacity 0.3s;
+      pointer-events: none;
+    }
+    .frame-timestamp {
+      position: absolute;
+      bottom: 12px;
+      left: 12px;
+      color: #fff;
+      font-size: 13px;
+      font-weight: 500;
+      background: rgba(0,0,0,0.7);
+      backdrop-filter: blur(4px);
+      padding: 4px 12px;
+      border-radius: 8px;
+    }
+    .frame-check {
+      position: absolute;
+      top: -12px;
+      right: -12px;
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      border: 2px solid var(--border);
+      background: #fff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: all 0.2s;
+      z-index: 20;
+    }
+    .frame-check:hover {
+      border-color: var(--accent);
+      box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+      transform: scale(1.1);
+    }
+    .frame-check.checked {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #fff;
+      box-shadow: 0 4px 12px rgba(59, 108, 231, 0.3);
+      transform: scale(1.1);
+    }
+    .frame-check svg {
+      width: 20px;
+      height: 20px;
+    }
+
+    /* ── Carousel Navigation ── */
+    .carousel-wrap {
+      position: relative;
+      max-width: 900px;
+      margin: 0 auto;
+    }
+    .carousel-nav {
+      position: absolute;
+      top: 50%;
+      transform: translateY(-50%);
+      z-index: 10;
+    }
+    .carousel-nav.prev { left: -60px; }
+    .carousel-nav.next { right: -60px; }
+
+    .page-dots {
+      display: flex;
+      justify-content: center;
+      gap: 8px;
+      margin-top: 24px;
+    }
+    .page-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      background: var(--border);
+      border: none;
+      cursor: pointer;
+      transition: all 0.3s;
+      padding: 0;
+    }
+    .page-dot.active {
+      background: var(--accent);
+      width: 24px;
+    }
+
+    /* ── Header area ── */
+    .section-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 16px;
+      margin-bottom: 32px;
+    }
+    .section-header-actions {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    /* ── Modal ── */
+    .modal-backdrop {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.6);
+      backdrop-filter: blur(4px);
+      z-index: 40;
+    }
+    .modal-backdrop.active { display: block; }
+
+    .modal-panel {
+      display: none;
+      position: fixed;
+      left: 50%;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      width: 95%;
+      max-width: 900px;
+      max-height: 90vh;
+      background: var(--card);
+      border-radius: var(--radius);
+      box-shadow: 0 24px 48px rgba(0,0,0,0.2);
+      z-index: 50;
+      flex-direction: column;
+      overflow: hidden;
+      animation: fadeIn 0.3s ease;
+    }
+    .modal-panel.active {
+      display: flex;
+    }
+    .modal-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 24px;
+      border-bottom: 1px solid var(--border);
+    }
+    .modal-body {
+      flex: 1;
+      overflow-y: auto;
+      padding: 24px;
+    }
+    .nearby-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 16px;
+    }
+    @media (max-width: 640px) {
+      .nearby-grid {
+        grid-template-columns: repeat(2, 1fr);
+      }
+    }
+    .nearby-frame {
+      position: relative;
+      border-radius: 12px;
+      overflow: hidden;
+      border: 2px solid var(--border);
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .nearby-frame:hover {
+      border-color: rgba(59, 108, 231, 0.5);
+    }
+    .nearby-frame.is-center {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(59, 108, 231, 0.15);
+    }
+    .nearby-frame img {
+      width: 100%;
+      aspect-ratio: 16/9;
+      object-fit: cover;
+      display: block;
+    }
+    .nearby-badge {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      background: var(--accent);
+      color: #fff;
+      font-size: 11px;
+      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: 6px;
+    }
+    .nearby-ts {
+      position: absolute;
+      bottom: 8px;
+      left: 8px;
+      background: rgba(0,0,0,0.6);
+      color: #fff;
+      font-size: 11px;
+      font-weight: 500;
+      padding: 2px 8px;
+      border-radius: 6px;
+    }
+
+    /* ── Spinner ── */
+    .spinner {
+      width: 48px;
+      height: 48px;
+      border: 4px solid var(--accent);
+      border-top-color: transparent;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    /* ── Summary Grid ── */
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 24px;
+    }
+    @media (max-width: 900px) {
+      .summary-grid {
+        grid-template-columns: repeat(2, 1fr);
+      }
+    }
+    @media (max-width: 540px) {
+      .summary-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+    .summary-card {
+      background: var(--card);
+      border-radius: var(--radius);
+      overflow: hidden;
+      border: 1px solid var(--border);
+      box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+      transition: box-shadow 0.2s;
+    }
+    .summary-card:hover {
+      box-shadow: 0 4px 16px rgba(0,0,0,0.08);
+    }
+    .summary-card img {
+      width: 100%;
+      aspect-ratio: 16/9;
+      object-fit: cover;
+      display: block;
+    }
+    .summary-card-body {
+      padding: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .summary-card-label {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 14px;
+      color: var(--muted);
+    }
+    .summary-ts-badge {
+      position: absolute;
+      top: 8px;
+      left: 8px;
+      background: rgba(0,0,0,0.6);
+      color: #fff;
+      font-size: 12px;
+      font-weight: 500;
+      padding: 4px 8px;
+      border-radius: 6px;
+    }
+
+    /* ── SVG Icons inline helper ── */
+    .icon { display: inline-flex; align-items: center; vertical-align: middle; }
+  </style>
+</head>
+<body>
+
+<!-- ============================================================ -->
+<!-- PAGE 1: Upload + Frame Selection                              -->
+<!-- ============================================================ -->
+<div id="page-upload" class="page-section active">
+  <div class="container">
+    <!-- Title -->
+    <div style="text-align:center; margin-bottom:48px;">
+      <h1 style="font-size:32px; font-weight:700; margin-bottom:8px;">DROPCUT</h1>
+      <p style="color:var(--muted); font-size:18px;">Select key frames from your videos with ease</p>
+    </div>
+
+    <!-- Upload Zone (shown when no frames) -->
+    <div id="upload-zone" class="upload-zone">
+      <label class="upload-label">
+        <input type="file" id="video-input" accept="video/mp4,video/quicktime" />
+        <div class="upload-icon-wrap">
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13"/></svg>
+        </div>
+        <p style="font-size:18px; font-weight:500;" id="upload-text">Upload a video</p>
+        <p style="font-size:14px; color:var(--muted); margin-top:4px;">Drag and drop or click to browse</p>
+        <p style="font-size:12px; color:var(--muted); margin-top:8px;">Supports MP4 and MOV files</p>
+      </label>
+    </div>
+
+    <!-- Frame Selection Area (hidden initially) -->
+    <div id="frame-area" style="display:none;">
+      <div class="section-header">
+        <div>
+          <h2 style="font-size:24px; font-weight:600;">Select Frames</h2>
+          <p style="color:var(--muted); margin-top:4px;">Click frames to view nearby options, check to select for export</p>
+        </div>
+        <div class="section-header-actions">
+          <p style="font-size:14px; color:var(--muted);"><span id="selected-count">0</span> frames selected</p>
+          <button class="btn btn-primary" id="btn-continue" disabled>Continue</button>
+        </div>
+      </div>
+
+      <div class="carousel-wrap">
+        <button class="btn btn-outline btn-icon carousel-nav prev" id="btn-prev" disabled>
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5"/></svg>
+        </button>
+        <button class="btn btn-outline btn-icon carousel-nav next" id="btn-next" disabled>
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5"/></svg>
+        </button>
+        <div id="frame-grid" class="frame-grid"></div>
+      </div>
+      <div id="page-dots" class="page-dots"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- PAGE 2: Summary / Download                                    -->
+<!-- ============================================================ -->
+<div id="page-summary" class="page-section">
+  <div class="container">
+    <button class="btn btn-ghost" id="btn-back" style="margin-bottom:24px;">
+      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M10.5 19.5 3 12m0 0 7.5-7.5M3 12h18"/></svg>
+      Back to Selection
+    </button>
+
+    <div class="section-header">
+      <div>
+        <h1 style="font-size:32px; font-weight:700; margin-bottom:8px;">Selected Frames</h1>
+        <p style="color:var(--muted); font-size:18px;"><span id="summary-count">0</span> frame(s) ready to download</p>
+      </div>
+      <button class="btn btn-primary btn-lg" id="btn-download-all">
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12M12 16.5V3"/></svg>
+        Download All
+      </button>
+    </div>
+
+    <div id="summary-grid" class="summary-grid"></div>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- MODAL: Nearby Frames                                          -->
+<!-- ============================================================ -->
+<div id="modal-backdrop" class="modal-backdrop"></div>
+<div id="modal-panel" class="modal-panel">
+  <div class="modal-header">
+    <div>
+      <h2 style="font-size:22px; font-weight:600;">Select Nearby Frame</h2>
+      <p style="font-size:14px; color:var(--muted); margin-top:4px;">Choose a more precise frame from around <span id="modal-timestamp">0:00</span></p>
+    </div>
+    <button class="btn btn-ghost btn-icon" id="btn-modal-close">
+      <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg>
+    </button>
+  </div>
+  <div class="modal-body">
+    <div id="modal-loading" style="display:flex; flex-direction:column; align-items:center; justify-content:center; height:256px;">
+      <div class="spinner"></div>
+      <p style="color:var(--muted); margin-top:16px;">Extracting nearby frames...</p>
+    </div>
+    <div id="modal-grid" class="nearby-grid" style="display:none;"></div>
+  </div>
+</div>
+
+<script>
+$(function () {
+  // ── State ──
+  let videoFile = null;
+  let allFrames = [];       // { id, dataUrl, timestamp, index }
+  let selectedIds = new Set();
+  let currentPage = 0;
+  const perPage = 4;
+  let clickedFrameId = null; // id of frame that was clicked to open modal
+
+  // ── Helpers ──
+  function fmtTime(sec) {
+    const m = Math.floor(sec / 60);
+    const s = Math.floor(sec % 60);
+    return m + ':' + String(s).padStart(2, '0');
+  }
+
+  function showPage(id) {
+    $('.page-section').removeClass('active');
+    $('#' + id).addClass('active');
+  }
+
+  // ── Extractors (canvas-based, same logic as original) ──
+  function extractFrames(file, count) {
+    return new Promise(function (resolve, reject) {
+      var video = document.createElement('video');
+      var canvas = document.createElement('canvas');
+      var ctx = canvas.getContext('2d');
+      if (!ctx) return reject('No canvas ctx');
+      video.preload = 'metadata';
+      video.crossOrigin = 'anonymous';
+      var frames = [];
+      var idx = 0;
+
+      video.onloadedmetadata = function () {
+        var duration = video.duration;
+        var interval = duration / count;
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+
+        function capture() {
+          if (idx >= count) {
+            URL.revokeObjectURL(video.src);
+            return resolve(frames);
+          }
+          video.currentTime = idx * interval;
+        }
+        video.onseeked = function () {
+          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+          frames.push({
+            id: 'frame-' + idx,
+            dataUrl: canvas.toDataURL('image/jpeg', 0.8),
+            timestamp: video.currentTime,
+            index: idx
+          });
+          idx++;
+          capture();
+        };
+        capture();
+      };
+      video.onerror = function () {
+        URL.revokeObjectURL(video.src);
+        reject('Video load error');
+      };
+      video.src = URL.createObjectURL(file);
+    });
+  }
+
+  function extractNearbyFrames(file, center, count) {
+    return new Promise(function (resolve, reject) {
+      var video = document.createElement('video');
+      var canvas = document.createElement('canvas');
+      var ctx = canvas.getContext('2d');
+      if (!ctx) return reject('No canvas ctx');
+      video.preload = 'metadata';
+      video.crossOrigin = 'anonymous';
+      var frames = [];
+      var idx = 0;
+      var offset = Math.floor(count / 2);
+
+      video.onloadedmetadata = function () {
+        var duration = video.duration;
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+
+        function capture() {
+          if (idx >= count) {
+            URL.revokeObjectURL(video.src);
+            return resolve(frames);
+          }
+          var rel = idx - offset;
+          var t = center + rel * 0.5;
+          t = Math.max(0, Math.min(t, duration));
+          video.currentTime = t;
+        }
+        video.onseeked = function () {
+          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+          frames.push({
+            id: 'nearby-' + idx,
+            dataUrl: canvas.toDataURL('image/jpeg', 0.8),
+            timestamp: video.currentTime,
+            index: idx
+          });
+          idx++;
+          capture();
+        };
+        capture();
+      };
+      video.onerror = function () {
+        URL.revokeObjectURL(video.src);
+        reject('Video load error');
+      };
+      video.src = URL.createObjectURL(file);
+    });
+  }
+
+  // ── Render Frame Grid ──
+  function renderFrames() {
+    var start = currentPage * perPage;
+    var end = start + perPage;
+    var pageFrames = allFrames.slice(start, end);
+    var totalPages = Math.ceil(allFrames.length / perPage);
+    var $grid = $('#frame-grid');
+    $grid.empty();
+
+    pageFrames.forEach(function (frame, i) {
+      var isChecked = selectedIds.has(frame.id);
+      var html = '<div class="frame-card" data-id="' + frame.id + '">' +
+        '<div class="frame-img-wrap' + (isChecked ? ' selected' : '') + '" data-action="click-frame" data-id="' + frame.id + '">' +
+          '<img src="' + frame.dataUrl + '" alt="Frame ' + (start + i + 1) + '" />' +
+          '<div class="frame-overlay"></div>' +
+          '<div class="frame-timestamp">' + fmtTime(frame.timestamp) + '</div>' +
+        '</div>' +
+        '<button class="frame-check' + (isChecked ? ' checked' : '') + '" data-action="toggle" data-id="' + frame.id + '">' +
+          (isChecked ? '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="m4.5 12.75 6 6 9-13.5"/></svg>' : '') +
+        '</button>' +
+      '</div>';
+      $grid.append(html);
+    });
+
+    // Pagination dots
+    var $dots = $('#page-dots');
+    $dots.empty();
+    for (var p = 0; p < totalPages; p++) {
+      $dots.append('<button class="page-dot' + (p === currentPage ? ' active' : '') + '" data-page="' + p + '"></button>');
+    }
+
+    // Nav buttons
+    $('#btn-prev').prop('disabled', currentPage === 0);
+    $('#btn-next').prop('disabled', currentPage >= totalPages - 1);
+
+    // Count
+    $('#selected-count').text(selectedIds.size);
+    $('#btn-continue').prop('disabled', selectedIds.size === 0);
+  }
+
+  // ── Video Upload ──
+  $('#video-input').on('change', function () {
+    var file = this.files[0];
+    if (!file) return;
+    videoFile = file;
+    $('#upload-text').text('Processing video...');
+
+    extractFrames(file, 20).then(function (frames) {
+      allFrames = frames;
+      currentPage = 0;
+      selectedIds.clear();
+      $('#upload-zone').hide();
+      $('#frame-area').show();
+      renderFrames();
+    }).catch(function (err) {
+      console.error('Extract error:', err);
+      $('#upload-text').text('Upload a video');
+    });
+  });
+
+  // Drag & Drop
+  $('.upload-label').on('dragover', function (e) { e.preventDefault(); });
+  $('.upload-label').on('drop', function (e) {
+    e.preventDefault();
+    var file = e.originalEvent.dataTransfer.files[0];
+    if (file && (file.type === 'video/mp4' || file.type === 'video/quicktime')) {
+      videoFile = file;
+      $('#upload-text').text('Processing video...');
+      extractFrames(file, 20).then(function (frames) {
+        allFrames = frames;
+        currentPage = 0;
+        selectedIds.clear();
+        $('#upload-zone').hide();
+        $('#frame-area').show();
+        renderFrames();
+      });
+    }
+  });
+
+  // ── Frame Click (open nearby modal) ──
+  $(document).on('click', '[data-action="click-frame"]', function () {
+    var id = $(this).data('id');
+    var frame = allFrames.find(function (f) { return f.id === id; });
+    if (!frame || !videoFile) return;
+    clickedFrameId = id;
+
+    // Show modal
+    $('#modal-timestamp').text(fmtTime(frame.timestamp));
+    $('#modal-loading').show();
+    $('#modal-grid').hide().empty();
+    $('#modal-backdrop, #modal-panel').addClass('active');
+
+    extractNearbyFrames(videoFile, frame.timestamp, 9).then(function (nearby) {
+      var centerIdx = Math.floor(nearby.length / 2);
+      nearby.forEach(function (nf, i) {
+        var isCenter = (i === centerIdx);
+        var html = '<div class="nearby-frame' + (isCenter ? ' is-center' : '') + '" data-action="pick-nearby" data-idx="' + i + '">' +
+          '<img src="' + nf.dataUrl + '" alt="Nearby frame ' + (i + 1) + '" />' +
+          '<div class="nearby-ts">' + fmtTime(nf.timestamp) + '</div>' +
+          (isCenter ? '<div class="nearby-badge">Original</div>' : '') +
+        '</div>';
+        $('#modal-grid').append(html);
+      });
+      // Store nearby frames on modal element
+      $('#modal-panel').data('nearby', nearby);
+      $('#modal-loading').hide();
+      $('#modal-grid').show();
+    });
+  });
+
+  // ── Pick Nearby Frame ──
+  $(document).on('click', '[data-action="pick-nearby"]', function () {
+    var idx = $(this).data('idx');
+    var nearby = $('#modal-panel').data('nearby');
+    if (!nearby || !nearby[idx]) return;
+    var chosen = nearby[idx];
+
+    // Replace original frame in allFrames
+    var origIdx = allFrames.findIndex(function (f) { return f.id === clickedFrameId; });
+    if (origIdx !== -1) {
+      allFrames[origIdx] = {
+        id: clickedFrameId,
+        dataUrl: chosen.dataUrl,
+        timestamp: chosen.timestamp,
+        index: allFrames[origIdx].index
+      };
+    }
+    closeModal();
+    renderFrames();
+  });
+
+  // ── Toggle Checkbox ──
+  $(document).on('click', '[data-action="toggle"]', function (e) {
+    e.stopPropagation();
+    var id = $(this).data('id');
+    if (selectedIds.has(id)) {
+      selectedIds.delete(id);
+    } else {
+      selectedIds.add(id);
+    }
+    renderFrames();
+  });
+
+  // ── Carousel Navigation ──
+  $('#btn-prev').on('click', function () {
+    if (currentPage > 0) { currentPage--; renderFrames(); }
+  });
+  $('#btn-next').on('click', function () {
+    var totalPages = Math.ceil(allFrames.length / perPage);
+    if (currentPage < totalPages - 1) { currentPage++; renderFrames(); }
+  });
+  $(document).on('click', '.page-dot', function () {
+    currentPage = $(this).data('page');
+    renderFrames();
+  });
+
+  // ── Continue → Summary ──
+  $('#btn-continue').on('click', function () {
+    if (selectedIds.size === 0) return;
+    renderSummary();
+    showPage('page-summary');
+  });
+
+  // ── Back to selection ──
+  $('#btn-back').on('click', function () {
+    showPage('page-upload');
+  });
+
+  // ── Modal Close ──
+  function closeModal() {
+    $('#modal-backdrop, #modal-panel').removeClass('active');
+  }
+  $('#btn-modal-close, #modal-backdrop').on('click', closeModal);
+
+  // ── Summary ──
+  function renderSummary() {
+    var selected = allFrames.filter(function (f) { return selectedIds.has(f.id); });
+    $('#summary-count').text(selected.length);
+    var $grid = $('#summary-grid');
+    $grid.empty();
+
+    selected.forEach(function (frame, i) {
+      var html = '<div class="summary-card">' +
+        '<div style="position:relative;">' +
+          '<img src="' + frame.dataUrl + '" alt="Frame ' + (i + 1) + '" />' +
+          '<div class="summary-ts-badge">' + fmtTime(frame.timestamp) + '</div>' +
+        '</div>' +
+        '<div class="summary-card-body">' +
+          '<div class="summary-card-label">' +
+            '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="m2.25 15.75 5.159-5.159a2.25 2.25 0 0 1 3.182 0l5.159 5.159m-1.5-1.5 1.409-1.409a2.25 2.25 0 0 1 3.182 0l2.909 2.909M3.75 21h16.5A2.25 2.25 0 0 0 22.5 18.75V5.25A2.25 2.25 0 0 0 20.25 3H3.75A2.25 2.25 0 0 0 1.5 5.25v13.5A2.25 2.25 0 0 0 3.75 21Z"/></svg>' +
+            '<span>Frame ' + (i + 1) + '</span>' +
+          '</div>' +
+          '<button class="btn btn-outline btn-sm" data-action="download-single" data-idx="' + i + '">' +
+            '<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12M12 16.5V3"/></svg>' +
+            ' Download' +
+          '</button>' +
+        '</div>' +
+      '</div>';
+      $grid.append(html);
+    });
+
+    // Store for download
+    $grid.data('selected', selected);
+  }
+
+  // ── Download Single ──
+  $(document).on('click', '[data-action="download-single"]', function () {
+    var idx = $(this).data('idx');
+    var selected = $('#summary-grid').data('selected');
+    if (!selected || !selected[idx]) return;
+    var frame = selected[idx];
+    var a = document.createElement('a');
+    a.href = frame.dataUrl;
+    a.download = 'frame-' + (idx + 1) + '-' + fmtTime(frame.timestamp).replace(':', '-') + '.jpg';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  });
+
+  // ── Download All (ZIP) ──
+  $('#btn-download-all').on('click', function () {
+    var selected = $('#summary-grid').data('selected');
+    if (!selected || selected.length === 0) return;
+    var $btn = $(this);
+    $btn.prop('disabled', true).text('Downloading...');
+
+    var zip = new JSZip();
+    selected.forEach(function (frame, i) {
+      var base64 = frame.dataUrl.split(',')[1];
+      var ts = fmtTime(frame.timestamp).replace(':', '-');
+      zip.file('frame-' + (i + 1) + '-' + ts + '.jpg', base64, { base64: true });
+    });
+
+    zip.generateAsync({ type: 'blob' }).then(function (blob) {
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      a.href = url;
+      a.download = 'frames-' + Date.now() + '.zip';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      $btn.prop('disabled', false).html(
+        '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12M12 16.5V3"/></svg> Download All'
+      );
+    });
+  });
+});
+</script>
+
+</body>
+</html>
